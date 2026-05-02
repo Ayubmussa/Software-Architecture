@@ -1,0 +1,90 @@
+# -----------------------------
+# OS / Editor
+# -----------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+
+# -----------------------------
+# Logs
+# -----------------------------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -----------------------------
+# Environment / secrets
+# -----------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# -----------------------------
+# Node.js / TypeScript
+# -----------------------------
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+.next/
+out/
+*.tsbuildinfo
+
+# -----------------------------
+# Python
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+
+# -----------------------------
+# Java / Maven / Gradle
+# -----------------------------
+target/
+.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+build/
+out/
+
+# -----------------------------
+# Docker / local data
+# -----------------------------
+*.pid
+*.seed
+*.pid.lock
+tmp/
+temp/
+
+# -----------------------------
+# Test artifacts
+# -----------------------------
+junit.xml
+test-results/
+playwright-report/
+

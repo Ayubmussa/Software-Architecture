@@ -1,0 +1,9 @@
+# Copy to application.properties and adjust for your environment.
+# For Docker (infra/docker-compose): password=root
+spring.application.name=order-service
+spring.datasource.url=jdbc:mysql://localhost:3306/order_service?useSSL=false&serverTimezone=UTC
+spring.datasource.username=root
+spring.datasource.password=
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+server.port=8080

@@ -1,0 +1,166 @@
+================================================================================
+  HOW TO RUN THE MULTI-LANGUAGE MICROSERVICES E-COMMERCE PLATFORM
+================================================================================
+
+This guide explains how to run all services and the frontend locally.
+
+--------------------------------------------------------------------------------
+1. PREREQUISITES
+--------------------------------------------------------------------------------
+
+  - Node.js 18+ (for gateway, user-service, frontend)
+  - Python 3.10+ (for product-service)
+  - Java 17+ and Maven (for order-service; or use ./mvnw in order-service)
+  - MongoDB (or use Docker)
+  - PostgreSQL (or use Docker)
+  - MySQL 8 (or use Docker)
+
+  Easiest for databases: use Docker and run the compose file (step 2).
+
+--------------------------------------------------------------------------------
+2. START THE DATABASES (RECOMMENDED: DOCKER)
+--------------------------------------------------------------------------------
+
+  From the project root:
+
+    docker compose -f infra/docker-compose.yml up -d
+
+  This starts:
+    - MongoDB       on localhost:27017  (user-service)
+    - PostgreSQL    on localhost:5432   (product-service), db: product_service, user: postgres, password: password
+    - MySQL         on localhost:3306   (order-service), db: order_service, root password: root
+    - RabbitMQ      on localhost:5672   (management UI http://localhost:15672, guest/guest)
+    - Elasticsearch on localhost:9200   (for future product search)
+
+  If you don't use Docker, install and run MongoDB, PostgreSQL, and MySQL
+  yourself and create the databases: product_service, order_service.
+
+  To stop:  docker compose -f infra/docker-compose.yml down
+
+--------------------------------------------------------------------------------
+3. USER SERVICE (Node.js / Express) - Port 4001
+--------------------------------------------------------------------------------
+
+  cd services/user-service
+
+  - Copy .env.example to .env and set:
+      PORT=4001
+      MONGO_URI=mongodb://localhost:27017/user-service
+      JWT_SECRET=your-secret-key-here
+
+  - Install and run:
+      npm install
+      npm run dev
+
+  Health: http://localhost:4001/health  (if you add a health route)
+  API base: http://localhost:4001/api/auth
+
+--------------------------------------------------------------------------------
+4. PRODUCT SERVICE (Python / FastAPI) - Port 5001
+--------------------------------------------------------------------------------
+
+  cd services/product-service
+
+  - Create .env (or copy from .env.example) with:
+      DATABASE_URL=postgresql://postgres:password@localhost:5432/product_service
+      ELASTICSEARCH_URL=http://localhost:9200
+
+  - Create a virtual environment (optional but recommended):
+      python -m venv venv
+      venv\Scripts\activate   (Windows)
+      source venv/bin/activate (Linux/macOS)
+
+  - Install and run:
+      pip install -r requirements.txt
+      python -m uvicorn app.main:app --reload --port 5001
+
+  - Optional: reindex products into Elasticsearch after seeding data:
+      POST http://localhost:5001/api/products/search/reindex
+
+  API docs: http://localhost:5001/docs
+  Health:   http://localhost:5001/health
+
+--------------------------------------------------------------------------------
+5. ORDER SERVICE (Java / Spring Boot) - Port 8080
+--------------------------------------------------------------------------------
+
+  cd services/order-service
+
+  - Ensure MySQL is running and database order_service exists (or let Hibernate create tables with ddl-auto=update).
+  - If using Docker MySQL: root password is "root". Edit src/main/resources/application.properties and set:
+      spring.datasource.password=root
+
+  - Run (from order-service folder):
+      ./mvnw spring-boot:run
+    Or on Windows:  mvnw.cmd spring-boot:run
+
+  - Optional (publish order_placed events to RabbitMQ when Rabbit is running):
+      mvnw.cmd spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=rabbit"
+
+  API base: http://localhost:8080/api/orders
+
+--------------------------------------------------------------------------------
+6. API GATEWAY (TypeScript / Express) - Port 4000
+--------------------------------------------------------------------------------
+
+  cd gateway
+
+  - Copy .env.example to .env and set:
+      PORT=4000
+      USER_SERVICE_URL=http://localhost:4001
+      PRODUCT_SERVICE_URL=http://localhost:5001
+      ORDER_SERVICE_URL=http://localhost:8080
+      JWT_SECRET=your-secret-key-here
+
+  IMPORTANT: JWT_SECRET must be the SAME as in the user-service .env.
+
+  - Install and run:
+      npm install
+      npm run dev
+
+  Health: http://localhost:4000/health
+  All client requests go to http://localhost:4000 (e.g. /api/auth, /api/products, /api/orders).
+
+--------------------------------------------------------------------------------
+7. FRONTEND (React / Vite) - Port 5173 (default)
+--------------------------------------------------------------------------------
+
+  cd frontend/frontend-app
+
+  - Install and run:
+      npm install
+      npm run dev
+
+  The app will open at http://localhost:5173 (or the port Vite shows).
+  Set the app to use the gateway: it is configured to call http://localhost:4000 (see frontend api base URL in code).
+
+--------------------------------------------------------------------------------
+8. RUN ORDER SUMMARY
+--------------------------------------------------------------------------------
+
+  Start in this order (databases first, then backend, then gateway, then frontend):
+
+    1. Databases:  docker compose -f infra/docker-compose.yml up -d
+    2. User:       cd services/user-service    && npm run dev
+    3. Product:    cd services/product-service && python -m uvicorn app.main:app --reload --port 5001
+    4. Order:      cd services/order-service  && ./mvnw spring-boot:run
+    5. Gateway:    cd gateway                  && npm run dev
+    6. Frontend:   cd frontend/frontend-app   && npm run dev
+
+  Then open the frontend URL (e.g. http://localhost:5173) in your browser.
+
+--------------------------------------------------------------------------------
+9. QUICK CHECK
+--------------------------------------------------------------------------------
+
+  - Gateway health:     http://localhost:4000/health
+  - Product API docs:   http://localhost:5001/docs
+  - Frontend:           http://localhost:5173
+
+  Register a user via the frontend, then browse products and place an order.
+  Promo codes supported at checkout: WELCOME10, SAVE20, VIP30.
+  Payment is simulated through payment-intent + webhook confirmation and should auto-mark orders as PAID.
+  Wishlist: sign in, save products from catalog/detail, then open the Wishlist tab to manage saved items.
+  Recommendations: check "Recommended for you" on landing and "Related products" inside product detail.
+
+================================================================================
