@@ -11,7 +11,13 @@ DATABASE_URL = os.getenv(
     "postgresql://postgres:password@localhost:5432/product_service",
 )
 
-engine = create_engine(DATABASE_URL, echo=False, future=True)
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    future=True,
+    pool_pre_ping=True,
+    connect_args={"connect_timeout": 2},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

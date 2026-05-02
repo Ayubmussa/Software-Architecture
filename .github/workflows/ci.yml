@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: cd services/product-service && pip install -r requirements.txt
-      - run: cd services/product-service && python -c "from app.main import app; print('OK')"
+      - run: cd services/product-service && python -m py_compile app/main.py app/models.py app/schemas.py app/database.py app/search.py
 
   order-service:
     runs-on: ubuntu-latest

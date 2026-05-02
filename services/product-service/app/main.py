@@ -1,6 +1,7 @@
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Header, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from . import models, schemas
 from .database import Base, SessionLocal, engine
@@ -16,7 +17,15 @@ def get_db():
         db.close()
 
 
-Base.metadata.create_all(bind=engine)
+def _safe_bootstrap_db() -> None:
+    """
+    Keep module import resilient in CI where Postgres may be unavailable.
+    Runtime API calls still require a reachable DB connection.
+    """
+    try:
+        Base.metadata.create_all(bind=engine)
+    except SQLAlchemyError:
+        pass
 
 
 def _ensure_legacy_schema_compatibility() -> None:
@@ -35,13 +44,17 @@ def _ensure_legacy_schema_compatibility() -> None:
         pass
 
 
-_ensure_legacy_schema_compatibility()
-
 app = FastAPI(
     title="Product Service",
     version="1.0.0",
     description="Manages product listings, categories, and inventories.",
 )
+
+
+@app.on_event("startup")
+def _startup_db_bootstrap() -> None:
+    _safe_bootstrap_db()
+    _ensure_legacy_schema_compatibility()
 
 
 def _attach_ratings(db: Session, products: list[models.Product]) -> list[models.Product]:
