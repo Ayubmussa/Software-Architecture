@@ -1,3 +1,8 @@
+import json
+import logging
+import time
+from uuid import uuid4
+
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Header, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
@@ -7,6 +12,8 @@ from . import models, schemas
 from .database import Base, SessionLocal, engine
 from .search import delete_product as unindex_product
 from .search import index_product, ping, search_product_ids
+
+logger = logging.getLogger("product-service")
 
 
 def get_db():
@@ -49,6 +56,33 @@ app = FastAPI(
     version="1.0.0",
     description="Manages product listings, categories, and inventories.",
 )
+
+
+@app.middleware("http")
+async def request_observability(request: Request, call_next):
+    request_id = (request.headers.get("x-request-id") or "").strip()[:128] or str(uuid4())
+    started = time.perf_counter()
+    response = None
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        status_code = response.status_code if response is not None else 500
+        if response is not None:
+            response.headers["X-Request-Id"] = request_id
+        logger.info(
+            json.dumps(
+                {
+                    "service": "product-service",
+                    "requestId": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": status_code,
+                    "durationMs": duration_ms,
+                }
+            )
+        )
 
 
 @app.on_event("startup")
@@ -119,6 +153,7 @@ def list_categories(db: Session = Depends(get_db)):
 
 @app.get("/api/products", response_model=list[schemas.ProductOut])
 def list_products(
+    response: Response,
     skip: int = 0,
     limit: int = 20,
     q: str | None = None,
@@ -144,6 +179,7 @@ def list_products(
                 (models.Product.name.ilike(term)) | (models.Product.description.ilike(term))
             )
         elif len(searched_ids) == 0:
+            response.headers["X-Total-Count"] = "0"
             return []
         else:
             query = query.filter(models.Product.id.in_(searched_ids))
@@ -155,6 +191,8 @@ def list_products(
         query = query.filter(models.Product.price <= max_price)
     if in_stock_only:
         query = query.filter(models.Product.stock > 0)
+    total = query.with_entities(func.count(models.Product.id)).scalar() or 0
+    response.headers["X-Total-Count"] = str(int(total))
     products = query.offset(max(skip, 0)).limit(min(limit, 100)).all()
     if searched_ids:
         rank = {pid: idx for idx, pid in enumerate(searched_ids)}
@@ -226,6 +264,42 @@ def recommend_products(
 
     ranked = sorted(candidates, key=score, reverse=True)
     return _attach_ratings(db, ranked[:target_limit])
+
+
+# NOTE: keep the admin /api/products/reviews handlers ABOVE every
+# /api/products/{product_id}... route. FastAPI matches in declaration order
+# and would otherwise try to coerce the literal "reviews" into product_id:int
+# and return 422.
+@app.get("/api/products/reviews", response_model=list[schemas.ReviewOut])
+def admin_list_reviews(
+    response: Response,
+    skip: int = 0,
+    limit: int = 100,
+    q: str | None = None,
+    db: Session = Depends(get_db),
+):
+    target_limit = max(1, min(limit, 250))
+    target_skip = max(0, skip)
+    query = db.query(models.ProductReview)
+    if q and q.strip():
+        token = f"%{q.strip()}%"
+        query = query.filter(
+            (models.ProductReview.author_name.ilike(token))
+            | (models.ProductReview.comment.ilike(token))
+        )
+    total = query.with_entities(func.count(models.ProductReview.id)).scalar() or 0
+    response.headers["X-Total-Count"] = str(int(total))
+    return query.order_by(models.ProductReview.created_at.desc()).offset(target_skip).limit(target_limit).all()
+
+
+@app.delete("/api/products/reviews/{review_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_review(review_id: int, db: Session = Depends(get_db)):
+    review = db.query(models.ProductReview).filter(models.ProductReview.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
+    db.delete(review)
+    db.commit()
+    return None
 
 
 @app.get("/api/products/{product_id}", response_model=schemas.ProductOut)
@@ -486,35 +560,6 @@ def delete_review(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="author_name is required")
         if review.author_name.strip().lower() != author_name.strip().lower():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the author can delete this review")
-    db.delete(review)
-    db.commit()
-    return None
-
-
-@app.get("/api/products/reviews", response_model=list[schemas.ReviewOut])
-def admin_list_reviews(
-    skip: int = 0,
-    limit: int = 100,
-    q: str | None = None,
-    db: Session = Depends(get_db),
-):
-    target_limit = max(1, min(limit, 250))
-    target_skip = max(0, skip)
-    query = db.query(models.ProductReview)
-    if q and q.strip():
-        token = f"%{q.strip()}%"
-        query = query.filter(
-            (models.ProductReview.author_name.ilike(token))
-            | (models.ProductReview.comment.ilike(token))
-        )
-    return query.order_by(models.ProductReview.created_at.desc()).offset(target_skip).limit(target_limit).all()
-
-
-@app.delete("/api/products/reviews/{review_id}", status_code=status.HTTP_204_NO_CONTENT)
-def admin_delete_review(review_id: int, db: Session = Depends(get_db)):
-    review = db.query(models.ProductReview).filter(models.ProductReview.id == review_id).first()
-    if not review:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
     db.delete(review)
     db.commit()
     return None

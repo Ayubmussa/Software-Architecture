@@ -24,6 +24,8 @@ public class OrderItem {
 
     private BigDecimal unitPrice;
 
+    private String category;
+
     @ManyToOne
     @JoinColumn(name = "order_id")
     private Order order;
@@ -58,6 +60,14 @@ public class OrderItem {
 
     public void setUnitPrice(BigDecimal unitPrice) {
         this.unitPrice = unitPrice;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
     }
 
     public Order getOrder() {

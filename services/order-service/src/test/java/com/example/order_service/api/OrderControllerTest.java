@@ -14,6 +14,7 @@ import java.util.List;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,8 +29,9 @@ class OrderControllerTest {
 
     @Test
     void health_returnsOk() throws Exception {
-        mockMvc.perform(get("/health"))
+        mockMvc.perform(get("/health").header("X-Request-Id", "test-request-1"))
                 .andExpect(status().isOk())
+                .andExpect(header().string("X-Request-Id", "test-request-1"))
                 .andExpect(jsonPath("$.status").value("ok"))
                 .andExpect(jsonPath("$.service").value("order-service"));
     }

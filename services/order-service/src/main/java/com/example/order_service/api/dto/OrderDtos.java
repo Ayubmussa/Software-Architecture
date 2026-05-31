@@ -26,6 +26,8 @@ public final class OrderDtos {
         @NotNull(message = "unitPrice is required")
         @DecimalMin(value = "0", inclusive = true, message = "unitPrice must be >= 0")
         private BigDecimal unitPrice;
+        @Size(max = 255, message = "category too long")
+        private String category;
 
         public Long getProductId() {
             return productId;
@@ -49,6 +51,14 @@ public final class OrderDtos {
 
         public void setUnitPrice(BigDecimal unitPrice) {
             this.unitPrice = unitPrice;
+        }
+
+        public String getCategory() {
+            return category;
+        }
+
+        public void setCategory(String category) {
+            this.category = category;
         }
     }
 
@@ -174,6 +184,8 @@ public final class OrderDtos {
         private Integer maxUses;
         private Boolean active;
         private String expiresAt;
+        @Size(max = 255, message = "categoryScope too long")
+        private String categoryScope;
 
         public String getCode() { return code; }
         public void setCode(String code) { this.code = code; }
@@ -187,6 +199,8 @@ public final class OrderDtos {
         public void setActive(Boolean active) { this.active = active; }
         public String getExpiresAt() { return expiresAt; }
         public void setExpiresAt(String expiresAt) { this.expiresAt = expiresAt; }
+        public String getCategoryScope() { return categoryScope; }
+        public void setCategoryScope(String categoryScope) { this.categoryScope = categoryScope; }
     }
 
     public static class PromotionResponse {
@@ -197,6 +211,7 @@ public final class OrderDtos {
         private Integer usedCount;
         private Boolean active;
         private OffsetDateTime expiresAt;
+        private String categoryScope;
 
         public String getCode() { return code; }
         public void setCode(String code) { this.code = code; }
@@ -212,6 +227,8 @@ public final class OrderDtos {
         public void setActive(Boolean active) { this.active = active; }
         public OffsetDateTime getExpiresAt() { return expiresAt; }
         public void setExpiresAt(OffsetDateTime expiresAt) { this.expiresAt = expiresAt; }
+        public String getCategoryScope() { return categoryScope; }
+        public void setCategoryScope(String categoryScope) { this.categoryScope = categoryScope; }
     }
 
     public static class UpdateShipmentRequest {
@@ -232,6 +249,7 @@ public final class OrderDtos {
         private Long productId;
         private int quantity;
         private BigDecimal unitPrice;
+        private String category;
 
         public Long getId() {
             return id;
@@ -263,6 +281,14 @@ public final class OrderDtos {
 
         public void setUnitPrice(BigDecimal unitPrice) {
             this.unitPrice = unitPrice;
+        }
+
+        public String getCategory() {
+            return category;
+        }
+
+        public void setCategory(String category) {
+            this.category = category;
         }
     }
 

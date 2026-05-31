@@ -35,6 +35,12 @@ This guide explains how to run all services and the frontend locally.
   If you don't use Docker, install and run MongoDB, PostgreSQL, and MySQL
   yourself and create the databases: product_service, order_service.
 
+  RabbitMQ reliability note:
+    - order.placed is now durable and dead-letters failed messages to order.placed.dlq.
+    - If RabbitMQ already has an older non-durable order.placed queue, delete that
+      queue in http://localhost:15672 or restart the RabbitMQ container before
+      starting the rabbit-enabled services.
+
   To stop:  docker compose -f infra/docker-compose.yml down
 
 --------------------------------------------------------------------------------
@@ -47,6 +53,7 @@ This guide explains how to run all services and the frontend locally.
       PORT=4001
       MONGO_URI=mongodb://localhost:27017/user-service
       JWT_SECRET=your-secret-key-here
+      RABBIT_URL=amqp://guest:guest@localhost:5672   # optional, for order analytics
 
   - Install and run:
       npm install
@@ -54,6 +61,14 @@ This guide explains how to run all services and the frontend locally.
 
   Health: http://localhost:4001/health  (if you add a health route)
   API base: http://localhost:4001/api/auth
+
+  - Seed demo users (1 admin + 14 customers + 1 inactive demo account):
+      node scripts/seed_users.js
+    Options:
+      node scripts/seed_users.js --reset      # delete demo users (by email) first
+    Demo credentials:
+      Admin     -> admin@shop.test    /  Admin123!
+      Customers -> *@example.com      /  Password123!
 
 --------------------------------------------------------------------------------
 4. PRODUCT SERVICE (Python / FastAPI) - Port 5001
@@ -74,8 +89,15 @@ This guide explains how to run all services and the frontend locally.
       pip install -r requirements.txt
       python -m uvicorn app.main:app --reload --port 5001
 
+  - Seed sample catalog (55 products, 10 categories, reviews):
+      python scripts/seed_products.py
+    Options:
+      python scripts/seed_products.py --reset        # clear existing products first
+      python scripts/seed_products.py --base-url http://localhost:5001
+
   - Optional: reindex products into Elasticsearch after seeding data:
       POST http://localhost:5001/api/products/search/reindex
+    (The seed script runs reindex automatically unless you pass --no-reindex.)
 
   API docs: http://localhost:5001/docs
   Health:   http://localhost:5001/health
@@ -95,9 +117,12 @@ This guide explains how to run all services and the frontend locally.
     Or on Windows:  mvnw.cmd spring-boot:run
 
   - Optional (publish order_placed events to RabbitMQ when Rabbit is running):
-      mvnw.cmd spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=rabbit"
+      mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=rabbit"
+    On PowerShell use quotes as shown above.
+    Requests and downstream calls log a shared X-Request-Id for tracing.
 
   API base: http://localhost:8080/api/orders
+  Default promo codes: WELCOME10, SAVE20, VIP30, BOOKS15 (Books category only)
 
 --------------------------------------------------------------------------------
 6. API GATEWAY (TypeScript / Express) - Port 4000
@@ -158,9 +183,13 @@ This guide explains how to run all services and the frontend locally.
   - Frontend:           http://localhost:5173
 
   Register a user via the frontend, then browse products and place an order.
-  Promo codes supported at checkout: WELCOME10, SAVE20, VIP30.
+  Promo codes supported at checkout: WELCOME10, SAVE20, VIP30, BOOKS15 (Books only).
   Payment is simulated through payment-intent + webhook confirmation and should auto-mark orders as PAID.
   Wishlist: sign in, save products from catalog/detail, then open the Wishlist tab to manage saved items.
+  Catalog pagination: browse products with page controls; filters reset to page 1 automatically.
   Recommendations: check "Recommended for you" on landing and "Related products" inside product detail.
+  Orders tab: shipment timeline shows placed → paid → shipped → delivered progress.
+  Admin panel: Products, Orders, Users, Reviews, Promotions, and Ops audit logs are paginated.
+  Admin Analytics tab: requires RabbitMQ + order-service rabbit profile + user-service RABBIT_URL.
 
 ================================================================================

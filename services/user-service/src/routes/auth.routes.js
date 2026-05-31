@@ -3,22 +3,27 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const User = require('../models/user.model');
+const OrderEvent = require('../models/orderEvent.model');
+const AuditLog = require('../models/auditLog.model');
 const authMiddleware = require('../middleware/auth.middleware');
 
 const router = express.Router();
-const adminAuditLogs = [];
 
-function writeAuditLog(actor, action, target, details = {}) {
-  adminAuditLogs.unshift({
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    createdAt: new Date().toISOString(),
-    actor: actor ? { id: actor.id, email: actor.email, role: actor.role } : null,
-    action,
-    target,
-    details,
-  });
-  if (adminAuditLogs.length > 500) {
-    adminAuditLogs.length = 500;
+async function writeAuditLog(actor, action, target, details = {}, requestId) {
+  try {
+    await AuditLog.create({
+      actor: actor
+        ? { id: String(actor.id || ''), email: actor.email, role: actor.role }
+        : null,
+      action,
+      target,
+      details: details ?? {},
+      requestId: requestId || undefined,
+    });
+  } catch (err) {
+    // Never break the calling request if audit logging itself fails.
+    // eslint-disable-next-line no-console
+    console.warn('writeAuditLog failed:', err.message);
   }
 }
 
@@ -237,7 +242,11 @@ router.get('/admin/users', authMiddleware, requireAdmin, async (req, res) => {
           ],
         }
       : {};
-    const users = await User.find(filter).select('-passwordHash').sort({ createdAt: -1 }).skip(skip).limit(limit);
+    const [users, total] = await Promise.all([
+      User.find(filter).select('-passwordHash').sort({ createdAt: -1 }).skip(skip).limit(limit),
+      User.countDocuments(filter),
+    ]);
+    res.set('X-Total-Count', String(total));
     return res.json(users);
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -274,7 +283,13 @@ router.patch('/admin/users/:id', authMiddleware, requireAdmin, async (req, res) 
       user.email = trimmed;
     }
     await user.save();
-    writeAuditLog(req.user, 'admin.user.update', `user:${user.id}`, { updates: { role, isActive, name, email } });
+    await writeAuditLog(
+      req.user,
+      'admin.user.update',
+      `user:${user.id}`,
+      { updates: { role, isActive, name, email } },
+      req.requestId
+    );
     return res.json(user);
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -293,7 +308,7 @@ router.delete('/admin/users/:id', authMiddleware, requireAdmin, async (req, res)
       return res.status(400).json({ message: 'Cannot delete your own admin account' });
     }
     await user.deleteOne();
-    writeAuditLog(req.user, 'admin.user.delete', `user:${req.params.id}`);
+    await writeAuditLog(req.user, 'admin.user.delete', `user:${req.params.id}`, {}, req.requestId);
     return res.status(204).send();
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -302,18 +317,165 @@ router.delete('/admin/users/:id', authMiddleware, requireAdmin, async (req, res)
   }
 });
 
+router.get('/admin/analytics/orders', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const sinceDays = Math.min(180, Math.max(1, Number(req.query.days) || 30));
+    const sinceDate = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
+
+    const [totals, daily, topUsersRaw, recent] = await Promise.all([
+      OrderEvent.aggregate([
+        { $match: { eventType: 'order.placed' } },
+        {
+          $group: {
+            _id: null,
+            totalOrders: { $sum: 1 },
+            totalRevenue: { $sum: { $ifNull: ['$totalAmount', 0] } },
+            uniqueUsers: { $addToSet: '$userId' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            totalOrders: 1,
+            totalRevenue: 1,
+            uniqueUsers: { $size: '$uniqueUsers' },
+          },
+        },
+      ]),
+      OrderEvent.aggregate([
+        { $match: { eventType: 'order.placed', occurredAt: { $gte: sinceDate } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$occurredAt' } },
+            orders: { $sum: 1 },
+            revenue: { $sum: { $ifNull: ['$totalAmount', 0] } },
+          },
+        },
+        { $sort: { _id: 1 } },
+        { $project: { _id: 0, day: '$_id', orders: 1, revenue: 1 } },
+      ]),
+      OrderEvent.aggregate([
+        { $match: { eventType: 'order.placed', userId: { $ne: null } } },
+        {
+          $group: {
+            _id: '$userId',
+            orders: { $sum: 1 },
+            revenue: { $sum: { $ifNull: ['$totalAmount', 0] } },
+          },
+        },
+        { $sort: { revenue: -1, orders: -1 } },
+        { $limit: 5 },
+      ]),
+      OrderEvent.find({ eventType: 'order.placed' })
+        .sort({ occurredAt: -1 })
+        .limit(10)
+        .lean(),
+    ]);
+
+    const summary = totals[0] || { totalOrders: 0, totalRevenue: 0, uniqueUsers: 0 };
+
+    let topUsers = topUsersRaw.map((u) => ({
+      orderUserId: u._id,
+      orders: u.orders,
+      revenue: u.revenue,
+      name: null,
+      email: null,
+    }));
+
+    if (topUsers.length > 0) {
+      const ids = topUsers.map((u) => u.orderUserId).filter((id) => id != null);
+      if (ids.length > 0) {
+        const users = await User.find({ orderUserId: { $in: ids } })
+          .select('name email orderUserId')
+          .lean();
+        const byId = new Map(users.map((u) => [u.orderUserId, u]));
+        topUsers = topUsers.map((u) => {
+          const user = byId.get(u.orderUserId);
+          return user ? { ...u, name: user.name, email: user.email } : u;
+        });
+      }
+    }
+
+    return res.json({
+      summary: {
+        totalOrders: summary.totalOrders || 0,
+        totalRevenue: summary.totalRevenue || 0,
+        uniqueUsers: summary.uniqueUsers || 0,
+        windowDays: sinceDays,
+      },
+      daily,
+      topUsers,
+      recent: recent.map((r) => ({
+        orderId: r.orderId,
+        userId: r.userId,
+        totalAmount: r.totalAmount,
+        status: r.status,
+        occurredAt: r.occurredAt,
+      })),
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('Error in GET /api/auth/admin/analytics/orders', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 router.get('/admin/audit-logs', authMiddleware, requireAdmin, async (req, res) => {
   try {
-    const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const skip = Math.max(0, Number(req.query.skip) || 0);
     const limit = Math.min(300, Math.max(1, Number(req.query.limit) || 100));
-    const filtered = q
-      ? adminAuditLogs.filter((log) => JSON.stringify(log).toLowerCase().includes(q))
-      : adminAuditLogs;
-    return res.json(filtered.slice(skip, skip + limit));
+
+    let filter = {};
+    if (q) {
+      const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter = {
+        $or: [
+          { action: rx },
+          { target: rx },
+          { 'actor.email': rx },
+          { 'actor.role': rx },
+        ],
+      };
+    }
+
+    const [docs, total] = await Promise.all([
+      AuditLog.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      AuditLog.countDocuments(filter),
+    ]);
+
+    const items = docs.map((d) => ({
+      id: String(d._id),
+      createdAt: d.createdAt,
+      actor: d.actor || null,
+      action: d.action,
+      target: d.target,
+      details: d.details ?? {},
+      requestId: d.requestId || null,
+    }));
+
+    res.set('X-Total-Count', String(total));
+    return res.json(items);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('Error in GET /api/auth/admin/audit-logs', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Internal endpoint used by the gateway (or other admin-authenticated callers)
+// to record audit entries for admin actions performed against any service.
+router.post('/admin/audit-logs', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const { action, target, details } = req.body || {};
+    if (!action || !target) {
+      return res.status(400).json({ message: 'action and target are required' });
+    }
+    await writeAuditLog(req.user, String(action), String(target), details || {}, req.requestId);
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('Error in POST /api/auth/admin/audit-logs', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
 });

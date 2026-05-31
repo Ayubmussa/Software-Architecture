@@ -15,7 +15,7 @@ This repository implements an end-to-end e-commerce platform using a microservic
 ## Implemented Capabilities
 
 - Authentication and profile management
-- Product catalog and category browsing
+- Product catalog and category browsing with page-based pagination
 - Product reviews and ratings:
   - create/edit/delete own reviews
   - verified purchase badges
@@ -26,16 +26,25 @@ This repository implements an end-to-end e-commerce platform using a microservic
   - recommended products
   - recently viewed
 - Orders and payment simulation
-- Promotions engine (admin-managed rules)
+- Customer order shipment timeline (placed / paid / shipped / delivered)
+- Promotions engine (admin-managed and paginated rules):
+  - expiry, usage limits, min basket, category-scoped discounts
 - Shipment updates (admin)
+- Order analytics (RabbitMQ `order.placed` → MongoDB projection → admin dashboard)
+- Observability and reliability:
+  - propagated `X-Request-Id` across gateway and services
+  - structured JSON request logs
+  - durable RabbitMQ `order.placed` queue with `order.placed.dlq`
 - Notification center:
   - in-app notifications
   - filters and unread counts
   - mark read / clear actions
 - Admin panel:
-  - users (search, pagination, role/activation updates, delete)
+  - products, orders, users, reviews, promotions, and audit logs with page-based pagination
+  - users (search, role/activation updates, delete)
   - global review moderation (delete + force edit)
   - promotions management
+  - order analytics (revenue, daily orders, top customers)
   - ops overview (service health)
   - basic audit logs
 
@@ -52,12 +61,21 @@ Fast path:
    - `services/order-service`: `mvnw.cmd spring-boot:run` (Windows) or `./mvnw spring-boot:run`
    - `gateway`: `npm run dev`
    - `frontend/frontend-app`: `npm run dev`
+3. Seed demo data (from repo root):
+   - Products (with product-service running): `python scripts/seed_products.py`
+     – 55 products across 10 categories, with images and sample reviews.
+   - Users (with MongoDB running): `node scripts/seed_users.js`
+     – 1 admin + 14 customers + 1 inactive account.
+     – Admin: `admin@shop.test` / `Admin123!`
+     – Customers: `*@example.com` / `Password123!`
 
 ## Environment Notes
 
 - `JWT_SECRET` must match between:
   - `services/user-service/.env`
   - `gateway/.env`
+- Optional for admin analytics: set `RABBIT_URL=amqp://guest:guest@localhost:5672` in user-service `.env`, and start order-service with the `rabbit` profile so `order.placed` events are consumed.
+- Existing local RabbitMQ queues created before the durable queue change may need to be deleted from the RabbitMQ UI (`http://localhost:15672`) or recreated by restarting the RabbitMQ container.
 - Example env files are provided (`.env.example` where available).
 - Do not commit real secrets; keep `.env` local.
 

@@ -16,6 +16,8 @@ import com.example.order_service.model.OrderItem;
 import com.example.order_service.model.OrderStatus;
 import com.example.order_service.model.PaymentStatus;
 import com.example.order_service.repository.OrderRepository;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
@@ -54,10 +57,25 @@ public class OrderController {
     }
 
     @GetMapping
-    public List<OrderResponse> getAllOrders() {
-        return orderRepository.findAll().stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+    public ResponseEntity<List<OrderResponse>> getAllOrders(
+            @RequestParam(name = "skip", defaultValue = "0") int skip,
+            @RequestParam(name = "limit", defaultValue = "0") int limit) {
+        long total = orderRepository.count();
+        List<Order> orders;
+        if (limit > 0) {
+            int safeLimit = Math.min(limit, 200);
+            int safeSkip = Math.max(0, skip);
+            int page = safeSkip / safeLimit;
+            orders = orderRepository
+                    .findAll(PageRequest.of(page, safeLimit, Sort.by(Sort.Direction.DESC, "id")))
+                    .getContent();
+        } else {
+            orders = orderRepository.findAll(Sort.by(Sort.Direction.DESC, "id"));
+        }
+        List<OrderResponse> body = orders.stream().map(this::toResponse).collect(Collectors.toList());
+        return ResponseEntity.ok()
+                .header("X-Total-Count", String.valueOf(total))
+                .body(body);
     }
 
     @PostMapping
@@ -77,6 +95,7 @@ public class OrderController {
             item.setProductId(itemRequest.getProductId());
             item.setQuantity(itemRequest.getQuantity());
             item.setUnitPrice(itemRequest.getUnitPrice());
+            item.setCategory(normalizeCategory(itemRequest.getCategory()));
 
             order.getItems().add(item);
             if (itemRequest.getUnitPrice() != null) {
@@ -88,13 +107,19 @@ public class OrderController {
         if (couponCode != null && promotionRule == null) {
             return ResponseEntity.badRequest().body(null);
         }
-        if (promotionRule != null && !promotionRule.isEligible(total)) {
+        BigDecimal eligibleSubtotal = promotionRule == null
+                ? total
+                : order.getItems().stream()
+                        .filter(promotionRule::matchesItem)
+                        .map(item -> item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (promotionRule != null && !promotionRule.isEligible(total, eligibleSubtotal)) {
             return ResponseEntity.badRequest().body(null);
         }
         BigDecimal discountRate = promotionRule == null ? null : promotionRule.percentOff;
         BigDecimal discountAmount = discountRate == null
                 ? BigDecimal.ZERO
-                : total.multiply(discountRate).setScale(2, RoundingMode.HALF_UP);
+                : eligibleSubtotal.multiply(discountRate).setScale(2, RoundingMode.HALF_UP);
         BigDecimal finalTotal = total.subtract(discountAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         order.setCouponCode(couponCode);
         order.setDiscountAmount(discountAmount);
@@ -188,6 +213,7 @@ public class OrderController {
         rule.maxUses = request.getMaxUses();
         rule.active = request.getActive() == null ? true : request.getActive();
         rule.expiresAt = parseDate(request.getExpiresAt());
+        rule.categoryScope = normalizeCategory(request.getCategoryScope());
         promotionRules.put(code, rule);
         return ResponseEntity.ok(toPromotionResponse(rule));
     }
@@ -206,6 +232,7 @@ public class OrderController {
         if (request.getMaxUses() != null) rule.maxUses = request.getMaxUses();
         if (request.getActive() != null) rule.active = request.getActive();
         if (request.getExpiresAt() != null) rule.expiresAt = parseDate(request.getExpiresAt());
+        if (request.getCategoryScope() != null) rule.categoryScope = normalizeCategory(request.getCategoryScope());
         return ResponseEntity.ok(toPromotionResponse(rule));
     }
 
@@ -297,6 +324,7 @@ public class OrderController {
             ir.setProductId(oi.getProductId());
             ir.setQuantity(oi.getQuantity());
             ir.setUnitPrice(oi.getUnitPrice());
+            ir.setCategory(oi.getCategory());
             return ir;
         }).collect(Collectors.toList());
         resp.setItems(items);
@@ -314,6 +342,17 @@ public class OrderController {
         return value.toUpperCase(Locale.ROOT);
     }
 
+    private static String normalizeCategory(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        return value;
+    }
+
     private PromotionRule resolvePromotion(String couponCode) {
         if (couponCode == null) {
             return null;
@@ -326,12 +365,13 @@ public class OrderController {
     }
 
     private void seedDefaultPromotions() {
-        createSeed("WELCOME10", BigDecimal.valueOf(0.10));
-        createSeed("SAVE20", BigDecimal.valueOf(0.20));
-        createSeed("VIP30", BigDecimal.valueOf(0.30));
+        createSeed("WELCOME10", BigDecimal.valueOf(0.10), null);
+        createSeed("SAVE20", BigDecimal.valueOf(0.20), null);
+        createSeed("VIP30", BigDecimal.valueOf(0.30), null);
+        createSeed("BOOKS15", BigDecimal.valueOf(0.15), "Books");
     }
 
-    private void createSeed(String code, BigDecimal percent) {
+    private void createSeed(String code, BigDecimal percent, String categoryScope) {
         PromotionRule rule = new PromotionRule();
         rule.code = code;
         rule.percentOff = percent;
@@ -340,6 +380,7 @@ public class OrderController {
         rule.usedCount = 0;
         rule.active = true;
         rule.expiresAt = null;
+        rule.categoryScope = categoryScope;
         promotionRules.put(code, rule);
     }
 
@@ -361,6 +402,7 @@ public class OrderController {
         resp.setUsedCount(rule.usedCount);
         resp.setActive(rule.active);
         resp.setExpiresAt(rule.expiresAt);
+        resp.setCategoryScope(rule.categoryScope);
         return resp;
     }
 
@@ -372,9 +414,18 @@ public class OrderController {
         int usedCount;
         boolean active = true;
         OffsetDateTime expiresAt;
+        String categoryScope;
 
-        boolean isEligible(BigDecimal basketTotal) {
+        boolean matchesItem(OrderItem item) {
+            if (categoryScope == null || categoryScope.isBlank()) {
+                return true;
+            }
+            return item.getCategory() != null && item.getCategory().equalsIgnoreCase(categoryScope);
+        }
+
+        boolean isEligible(BigDecimal basketTotal, BigDecimal eligibleSubtotal) {
             if (basketTotal == null) return false;
+            if (categoryScope != null && eligibleSubtotal.compareTo(BigDecimal.ZERO) <= 0) return false;
             if (minBasketAmount == null) return true;
             return basketTotal.compareTo(minBasketAmount) >= 0;
         }
