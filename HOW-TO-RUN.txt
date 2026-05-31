@@ -150,7 +150,7 @@ This guide explains how to run all services and the frontend locally.
 7. FRONTEND (React / Vite) - Port 5173 (default)
 --------------------------------------------------------------------------------
 
-  cd frontend/frontend-app
+  cd frontend-app
 
   - Install and run:
       npm install
@@ -170,7 +170,7 @@ This guide explains how to run all services and the frontend locally.
     3. Product:    cd services/product-service && python -m uvicorn app.main:app --reload --port 5001
     4. Order:      cd services/order-service  && ./mvnw spring-boot:run
     5. Gateway:    cd gateway                  && npm run dev
-    6. Frontend:   cd frontend/frontend-app   && npm run dev
+    6. Frontend:   cd frontend-app             && npm run dev
 
   Then open the frontend URL (e.g. http://localhost:5173) in your browser.
 

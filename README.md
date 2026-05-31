@@ -5,7 +5,7 @@ This repository implements an end-to-end e-commerce platform using a microservic
 
 ## Architecture
 
-- **Frontend (`frontend/frontend-app`)**: React + TypeScript (Vite)
+- **Frontend (`frontend-app`)**: React + TypeScript (Vite)
 - **API Gateway (`gateway`)**: Node.js + Express + TypeScript
 - **User Service (`services/user-service`)**: Node.js + Express + MongoDB
 - **Product Service (`services/product-service`)**: Python + FastAPI + PostgreSQL + Elasticsearch
@@ -60,7 +60,7 @@ Fast path:
    - `services/product-service`: `python -m uvicorn app.main:app --reload --port 5001`
    - `services/order-service`: `mvnw.cmd spring-boot:run` (Windows) or `./mvnw spring-boot:run`
    - `gateway`: `npm run dev`
-   - `frontend/frontend-app`: `npm run dev`
+   - `frontend-app`: `npm run dev`
 3. Seed demo data (from repo root):
    - Products (with product-service running): `python scripts/seed_products.py`
      – 55 products across 10 categories, with images and sample reviews.
