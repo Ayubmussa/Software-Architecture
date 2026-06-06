@@ -90,4 +90,6 @@ playwright-report/
 
 
 scripts/generate_report.py
+output
+scripts/generate_presentation.py
 

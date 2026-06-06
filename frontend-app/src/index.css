@@ -28,3 +28,15 @@ a {
 button {
   cursor: pointer;
 }
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}

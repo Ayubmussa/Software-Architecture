@@ -2053,24 +2053,26 @@ function App() {
                               <span>★ {r.rating}</span>
                               {r.comment && <span>{r.comment}</span>}
                             </div>
-                            <button type="button" className="btn-danger" onClick={() => handleAdminReviewDelete(r.id)}>
-                              Remove
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-ghost"
-                              onClick={() =>
-                                setAdminReviewEdit({
-                                  id: r.id,
-                                  product_id: r.product_id,
-                                  author_name: r.author_name,
-                                  rating: r.rating,
-                                  comment: r.comment ?? '',
-                                })
-                              }
-                            >
-                              Edit
-                            </button>
+                            <div className="admin-product-actions">
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() =>
+                                  setAdminReviewEdit({
+                                    id: r.id,
+                                    product_id: r.product_id,
+                                    author_name: r.author_name,
+                                    rating: r.rating,
+                                    comment: r.comment ?? '',
+                                  })
+                                }
+                              >
+                                Edit
+                              </button>
+                              <button type="button" className="btn-danger" onClick={() => handleAdminReviewDelete(r.id)}>
+                                Remove
+                              </button>
+                            </div>
                           </li>
                         ))}
                       </ul>
